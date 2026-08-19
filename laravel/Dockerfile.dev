@@ -1,0 +1,60 @@
+FROM dunglas/frankenphp:1-php8.4
+
+ARG FOLDER=/app
+ENV FOLDER=${FOLDER}
+
+WORKDIR ${FOLDER}
+
+# Install system dependencies + PHP extensions
+RUN apt-get update && apt-get install -y \
+    git \
+    curl \
+    unzip \
+    bash \
+    libicu-dev \
+    libpq-dev \
+    tini \
+    && docker-php-ext-install \
+    pdo_mysql \
+    pdo_pgsql \
+    bcmath \
+    intl \
+    opcache \
+    && rm -rf /var/lib/apt/lists/* \
+    && which tini && tini --version
+
+# Install Composer
+RUN curl -sS https://getcomposer.org/installer | php \
+    -- --install-dir=/usr/local/bin --filename=composer
+
+# Install Node.js
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create user (Debian style)
+RUN groupadd -g 1000 devgroup && \
+    useradd -u 1000 -g devgroup -m -s /bin/bash devuser
+
+# Prepare Caddy data directory (fix permissions issue you saw earlier)
+RUN mkdir -p /data/caddy \
+    && chown -R devuser:devgroup /data/caddy
+
+# Switch to non-root user
+USER devuser
+
+EXPOSE 80
+EXPOSE 5173
+
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+CMD ["sh", "-c", "\
+    echo '[startup] Waiting for files in $(pwd)...'; \
+    while [ -z \"$(ls -A .)\" ]; do \
+    sleep 1; \
+    done; \
+    echo '[startup] Files ready, starting npm dev server...'; \
+    npm run dev -- --host 0.0.0.0 & \
+    echo '[startup] Starting FrankenPHP server (root: $(pwd)/public)...'; \
+    exec frankenphp php-server --root public \
+    "]
